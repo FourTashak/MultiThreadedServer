@@ -8,7 +8,7 @@
 #include <string>
 #include <conio.h>
 #include <thread>
-#include "Market.h"
+//#include "Market.h"
 
 #pragma comment (lib, "Ws2_32.lib")
 
@@ -214,8 +214,8 @@ public:
         {
             Sleep(200);
             std::string buffer;
-            for (int i = 0; i < Market.size(); i++)
-                buffer += (Cus_Map[Cus].Customershares[i].Share_Name + "$" + std::to_string(Cus_Map[Cus].Customershares[i].Share_Quantity) + "$" + std::to_string(Market[i].price) + "$");
+            /*for (int i = 0; i < Market.size(); i++)
+                buffer += (Cus_Map[Cus].Customershares[i].Share_Name + "$" + std::to_string(Cus_Map[Cus].Customershares[i].Share_Quantity) + "$" + std::to_string(Market[i].price) + "$");*/
 
             int result = send(clientsocket, buffer.c_str(), buffer.size(), 0);
             if (result == SOCKET_ERROR)
@@ -223,7 +223,7 @@ public:
                 return false;
             }
             buffer.clear();
-            buffer = std::to_string(Cus_Map[Cus].Balance);
+            //buffer = std::to_string(Cus_Map[Cus].Balance);
             Sleep(1000);
             result = send(clientsocket, buffer.c_str(), buffer.size(), 0);
             if (result == SOCKET_ERROR)
@@ -282,14 +282,12 @@ public:
 							if (bytes_rec == -1) //if theres an error with the socket, the thread will set the customer as not logged in and will remove the socket from the vector containing it
                             {
                                 std::cout << "Socket Error, Disconnecting Client" << std::endl;
-                                Cus_Map[ConVec[number][i].Name].logged_in = false;
                                 FD_CLR(*ConVec[number][i].sock_.get(), &ReadVec[number]);
                                 ConVec[number].erase(ConVec[number].begin() + i);
                             }
 							else if (bytes_rec == 0) // If connection is no longer alive, the thread will set the customer as not logged in and will remove the socket from the vector containing it
 							{
                                 std::cout << "Socket Error, Disconnecting Client" << std::endl;
-                                Cus_Map[ConVec[number][i].Name].logged_in = false;
                                 FD_CLR(*ConVec[number][i].sock_.get(), &ReadVec[number]);
                                 ConVec[number].erase(ConVec[number].begin()+i);
 							}
@@ -345,117 +343,7 @@ public:
         }
         bool DataStream(char* Received)
         {
-        #define Login 1
-        #define Buy 2
-        #define Sell 3
-        #define Refresh 4
-
-            if (std::stoi(&Received[0]) == Login)
-            {
-                std::string username;
-                std::string password;
-                for (int i = 1; i < 25; i++)
-                {
-                    if (Received[i] != '$')
-                        username += Received[i];
-                    else
-                    {
-                        for (i += 1; i < (i + 64); i++)
-                        {
-                            if (Received[i] != '$')
-                                password += Received[i];
-                            else
-                                break;
-                        }
-                        break;
-                    }
-                }
-                Customer dummy;
-                dummy = Authenticate(username, password);
-                if (dummy.id==-1 || dummy.logged_in == true ) 
-                    return false;
-                else
-                {
-                    Cus_Map[username].logged_in = true;
-                    Name = dummy.Name;
-                    Name = username;
-                    return true;
-                }
-            }
-            else if (std::stoi(&Received[0]) == Buy && Cus_Map[Name].logged_in == true)
-            {
-                std::string StockName;
-                int Amount;
-                std::string Buffer;
-                for (int i = 1; i < 6; i++)
-                {
-                    if (Received[i] != '$')
-                        Buffer += Received[i];
-                    else
-                    {
-                        StockName = Buffer;
-                        Buffer.clear();
-                        int j = (i + 6);
-                        i++;
-                        for (; i < j; i++)
-                        {
-                            if (Received[i] != '$')
-                                Buffer += Received[i];
-                            else
-                                break;
-                        }
-                        Amount = std::stoi(Buffer);
-                        break;
-                    }
-                }
-                //after the data is extracted the buystock function is called
-                if (BuyStock(Amount, StockName, Cus_Map[this->Name]) && Cus_Map[Name].logged_in == true)
-                    return true;
-                else
-                    return false;
-            }
-            else if (std::stoi(&Received[0]) == Sell)
-            {
-                std::string StockName;
-                int Amount;
-                std::string Buffer;
-                for (int i = 1; i < 6; i++)
-                {
-                    if (Received[i] != '$')
-                        Buffer += Received[i];
-                    else
-                    {
-                        StockName = Buffer;
-                        Buffer.clear();
-                        int j = (i + 6);
-                        i++;
-                        for (; i < j; i++)
-                        {
-                            if (Received[i] != '$')
-                                Buffer += Received[i];
-                            else
-                                break;
-                        }
-                        Amount = std::stoi(Buffer);
-                        break;
-                    }
-                }
-                //after the data is extracted the sellstock function is called
-                if (SellStock(Amount, StockName, Cus_Map[this->Name]) && Cus_Map[Name].logged_in == true)
-                    return true;
-                else
-                    return false;
-            }
-            else if (std::stoi(&Received[0]) == Refresh)
-            {
-                //when refresh is requested the server replies with updated stock prices
-                std::string Buffer = "4";
-                for (int i = 0; i < Market.size(); i++)
-                {
-                    Buffer += std::to_string(Market[i].price) + "$";
-                }
-                send(*this->sock_.get(), Buffer.c_str(), Buffer.size(), NULL);
-            }
+          //send(*this->sock_.get(), Buffer.c_str(), Buffer.size(), NULL);
         }
     private:
         std::shared_ptr<SOCKET> sock_;
