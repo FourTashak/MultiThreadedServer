@@ -102,11 +102,10 @@ int threadPool::SocketMain(Threads& Th)
         if (iResult == SOCKET_ERROR)
         {
             std::cout << "Socket error occured, Error code: " << WSAGetLastError() << std::endl;
-            continue;
         }
         else if (iResult == 0)
         {
-            continue;
+
         }
         else
         {
@@ -123,7 +122,7 @@ int threadPool::SocketMain(Threads& Th)
                 {
                     //The SetManager functions purpose is to evenly distribute incomming connections to each thread
                     //it will always assign the new connection to the thread that has the least connections to manage, this evens the load on all threads.
-                    SetManager(clientSocket, clientAddress);
+                    InComingConnectionSetManager(clientSocket, clientAddress);
                     char addrStr[INET_ADDRSTRLEN];
                     inet_ntop(AF_INET, &(clientAddress.sin_addr), addrStr, INET_ADDRSTRLEN);
                     std::cout << "Connected: " << addrStr << ":" << clientAddress.sin_port << std::endl;
@@ -136,6 +135,27 @@ int threadPool::SocketMain(Threads& Th)
                 std::cout << "Error accepting connection from: " << addrStr << ":" << clientAddress.sin_port << " Error code: " << WSAGetLastError() << std::endl;
                 closesocket(serverSocket);
             }
+        }
+
+        auto start_time = std::chrono::high_resolution_clock::now();
+
+        auto ElapsedTime = std::chrono::duration_cast<std::chrono::milliseconds>(LastTime - start_time);
+
+        if (ElapsedTime.count() > 500)
+        {
+            //lock
+
+            LastTime = start_time;
+
+            for (int i = WorkToBeDone.size() - 1; i >= 0; i--)
+            {
+                if (WorkToBeDone[i]->BMarkedForDelete)
+                {
+                    WorkToBeDone.erase(WorkToBeDone.begin() + i);
+                }
+            }
+
+            //unlock
         }
     }
     // Close the socket and clean up
@@ -160,7 +180,7 @@ int threadPool::SetSizeFinder()
     return setindentifier;
 }
 
-void threadPool::SetManager(SOCKET clientsocket, sockaddr_in Clientaddress)
+void threadPool::InComingConnectionSetManager(SOCKET clientsocket, sockaddr_in Clientaddress)
 {
     int i = SetSizeFinder();
     FD_SET(clientsocket, &Readsets[i]);
@@ -168,30 +188,7 @@ void threadPool::SetManager(SOCKET clientsocket, sockaddr_in Clientaddress)
     Cons[i].emplace_back(Connections(std::move(clientsocketnew), Clientaddress));
 }
 
-int threadPool::Threads::SendCusInfo(SOCKET clientsocket, std::string Cus)
-{
-    Sleep(200);
-    std::string buffer;
-    /*for (int i = 0; i < Market.size(); i++)
-        buffer += (Cus_Map[Cus].Customershares[i].Share_Name + "$" + std::to_string(Cus_Map[Cus].Customershares[i].Share_Quantity) + "$" + std::to_string(Market[i].price) + "$");*/
-
-    int result = send(clientsocket, buffer.c_str(), buffer.size(), 0);
-    if (result == SOCKET_ERROR)
-    {
-        return false;
-    }
-    buffer.clear();
-    //buffer = std::to_string(Cus_Map[Cus].Balance);
-    Sleep(1000);
-    result = send(clientsocket, buffer.c_str(), buffer.size(), 0);
-    if (result == SOCKET_ERROR)
-    {
-        return false;
-    }
-    return true;
-}
-
-void threadPool::Threads::run(int number, std::vector<std::vector<Connections>>& ConVec, std::vector<fd_set>& ReadVec, std::vector<bool>& Joinflag)
+void threadPool::Threads::run(int ThreadIndex, std::vector<std::vector<Connections>>& ConVec, std::vector<fd_set>& ReadVec, std::vector<bool>& Joinflag)
 {
     timeval t;
     t.tv_usec = 100000;
@@ -199,54 +196,54 @@ void threadPool::Threads::run(int number, std::vector<std::vector<Connections>>&
     while (true)
     {
         //if the joinflag gets set by the main thread the worker thread will end all client connections and join.
-        if (JoinFlag[number] == true)
+        if (JoinFlag[ThreadIndex] == true)
         {
-            for (int i = 0; i < ConVec[number].size(); i++)
+            for (int i = 0; i < ConVec[ThreadIndex].size(); i++)
             {
-                ConVec[number][i].~Connections();
+                ConVec[ThreadIndex][i].~Connections();
             }
             break;
         }
         int Sel = 0;
         Sleep(50);
         //Cleans the fd_set
-        FD_ZERO(&(ReadVec[number]));
+        FD_ZERO(&(ReadVec[ThreadIndex]));
         //sets the fd_set with assigned sockets
-        for (int i = 0; i < ConVec[number].size(); i++)
+        for (int i = 0; i < ConVec[ThreadIndex].size(); i++)
         {
-            FD_SET(*ConVec[number][i].sock_.get(), &ReadVec[number]);
+            FD_SET(*ConVec[ThreadIndex][i].sock_.get(), &ReadVec[ThreadIndex]);
         }
-        if (ReadVec[number].fd_count > 0)
+        if (ReadVec[ThreadIndex].fd_count > 0)
         {
             //the select function checks if there is data to be received
-            Sel = select(FD_SETSIZE, &ReadVec[number], NULL, NULL, &t);
+            Sel = select(FD_SETSIZE, &ReadVec[ThreadIndex], NULL, NULL, &t);
         }
         if (Sel == SOCKET_ERROR)
         {
-            std::cout << "Socket Error at thread number : " << number << std::endl;
+            std::cout << "Socket Error at thread number : " << ThreadIndex << std::endl;
             Sleep(50);
         }
         else if (Sel == 0) { Sleep(50); }
         else
         {
             //loops through every socket and checks which socket has data to be received
-            for (int i = 0; i < ReadVec[number].fd_count; i++)
+            for (int i = 0; i < ReadVec[ThreadIndex].fd_count; i++)
             {
-                if (FD_ISSET(*ConVec[number][i].sock_.get(), &ReadVec[number]))
+                if (FD_ISSET(*ConVec[ThreadIndex][i].sock_.get(), &ReadVec[ThreadIndex]))
                 {
                     char buffer[1024];
-                    int bytes_rec = recv(*ConVec[number][i].sock_.get(), buffer, sizeof(buffer), 0);
+                    int bytes_rec = recv(*ConVec[ThreadIndex][i].sock_.get(), buffer, sizeof(buffer), 0);
                     if (bytes_rec == -1) //if theres an error with the socket, the thread will set the customer as not logged in and will remove the socket from the vector containing it
                     {
                         std::cout << "Socket Error, Disconnecting Client" << std::endl;
-                        FD_CLR(*ConVec[number][i].sock_.get(), &ReadVec[number]);
-                        ConVec[number].erase(ConVec[number].begin() + i);
+                        FD_CLR(*ConVec[ThreadIndex][i].sock_.get(), &ReadVec[ThreadIndex]);
+                        ConVec[ThreadIndex].erase(ConVec[ThreadIndex].begin() + i);
                     }
                     else if (bytes_rec == 0) // If connection is no longer alive, the thread will set the customer as not logged in and will remove the socket from the vector containing it
                     {
                         std::cout << "Socket Error, Disconnecting Client" << std::endl;
-                        FD_CLR(*ConVec[number][i].sock_.get(), &ReadVec[number]);
-                        ConVec[number].erase(ConVec[number].begin() + i);
+                        FD_CLR(*ConVec[ThreadIndex][i].sock_.get(), &ReadVec[ThreadIndex]);
+                        ConVec[ThreadIndex].erase(ConVec[ThreadIndex].begin() + i);
                     }
                     else //If connection is not closed and there is data waiting to be read on socket
                     {
@@ -260,12 +257,45 @@ void threadPool::Threads::run(int number, std::vector<std::vector<Connections>>&
                             Numbers.push_back(std::stoi(&C));
                         }
 
-                        //put the work into queue and then later on send the result back to the client
+                        Work *NewWork = new Work(Numbers, ThreadIndex, *ConVec[ThreadIndex][i].sock_.get());
 
-                        //int result = send(*ConVec[number][i].sock_.get(), "1", 3, 0);
+                        OwnerPool->WorkToBeDone.push_back(std::move(NewWork));
+
+                        //int result = send(*ConVec[ThreadIndex][i].sock_.get(), "Zort", 3, 0);
                     }
                 }
             }
         }
+
+        if()
+        {
+            for (auto& Work : OwnerPool->WorkToBeDone)
+            {
+                if (!Work->BTaken.exchange(true))
+                {
+                    GetWorkAndSendResult(Work);
+                }
+            }
+        }
     }
+}
+
+void threadPool::Threads::GetWorkAndSendResult(Work* InWork)
+{
+    InWork->BTaken.store(true);
+
+    int64_t Result = 1;
+
+    for (int Num : InWork->Numbers)
+    {
+        Result *= Num;
+    }
+
+    InWork->Result = Result;
+
+    std::string Packet = std::to_string(Result);
+
+    int result = send(*InWork->QuerierSocket, Packet.c_str(), Packet.size(), 0);
+
+    InWork->BMarkedForDelete = true;
 }
