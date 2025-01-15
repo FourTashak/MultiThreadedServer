@@ -12,11 +12,19 @@ void ThreadPoolManager::UnlockWorkToBeDone()
 
 ThreadPoolManager::ThreadPoolManager(unsigned int numberofthreads)
 {
+    LastTime = std::chrono::high_resolution_clock::now();
+
     Cons.resize(numberofthreads);
     Readsets.reserve(numberofthreads);
     Construct_Vecs(numberofthreads);
-    //WorkerThread th(numberofthreads, Cons, Readsets, this);
+    for (int i = 0; i < numberofthreads; i++) 
+    {
+        WorkObj* newWorkObj = new WorkObj;
+        WorkToBeDone.push_back(newWorkObj);
+    }
     SocketMain(numberofthreads);
+
+    
 }
 
 void ThreadPoolManager::Construct_Vecs(int size)
@@ -30,7 +38,7 @@ void ThreadPoolManager::Construct_Vecs(int size)
     }
 }
 
-int ThreadPoolManager::SocketMain(int numberofthreads)
+int ThreadPoolManager::SocketMain(unsigned int numberofthreads)
 {
     // Initialize Winsock2
     WSADATA wsaData;
@@ -167,23 +175,33 @@ int ThreadPoolManager::SocketMain(int numberofthreads)
 
         auto start_time = std::chrono::high_resolution_clock::now();
 
-        auto ElapsedTime = std::chrono::duration_cast<std::chrono::milliseconds>(LastTime - start_time);
+        auto ElapsedTime = std::chrono::duration_cast<std::chrono::milliseconds>(start_time - LastTime);
 
         if (ElapsedTime.count() > 500)
         {
-            //lock
-
             LastTime = start_time;
 
-            for (int i = WorkToBeDone.size() - 1; i >= 0; i--)
+            for (int i = 0; i<WorkToBeDone.size(); i++)
             {
-                if (WorkToBeDone[i]->BMarkedForDelete)
+                while (true)
                 {
-                    WorkToBeDone.erase(WorkToBeDone.begin() + i);
-                }
-            }
+                    bool Locked = WorkToBeDone[i]->Lock.try_lock();
 
-            //unlock
+                    if (Locked)
+                    {
+                        for (int j = WorkToBeDone[i]->Works.size() - 1; j >= 0; j--)
+                        {
+                            if (WorkToBeDone[i]->Works[j]->BMarkedForDelete)
+                            {
+                                WorkToBeDone.erase(WorkToBeDone.begin() + i);
+                            }
+                        }
+
+                        WorkToBeDone[i]->Lock.unlock();
+                        break;
+                    }
+                }   
+            }
         }
     }
     // Close the socket and clean up
@@ -292,21 +310,29 @@ void WorkerThread::run(int ThreadIndex, std::vector<std::vector<Connections>>& C
 
                         Work *NewWork = new Work(Numbers, ThreadIndex, *ConVec[ThreadIndex][i].sock_.get());
 
-                        OwnerPool->GetWorkVector().push_back(std::move(NewWork));
+                        std::mutex* ThisThreadWorkLock = &OwnerPool->GetWorkVector()[ThreadIndex]->Lock;
+
+                        while (true)
+                        {
+                            bool CanLock = ThisThreadWorkLock->try_lock();
+
+                            if (CanLock)
+                            {
+                                OwnerPool->GetWorkVector()[ThreadIndex]->Works.push_back(std::move(NewWork));
+
+                                ThisThreadWorkLock->unlock();
+
+                                break;
+                            }
+                            else
+                            {
+                                volatile int debug = 1;
+                                debug += 1;
+                            }
+                        }
 
                         //int result = send(*ConVec[ThreadIndex][i].sock_.get(), "Zort", 3, 0);
                     }
-                }
-            }
-        }
-
-        if(true)
-        {
-            for (auto& Work : OwnerPool->GetWorkVector())
-            {
-                if (!Work->BTaken.exchange(true))
-                {
-                    GetWorkAndSendResult(Work);
                 }
             }
         }

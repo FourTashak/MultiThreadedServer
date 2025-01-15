@@ -39,6 +39,15 @@ public:
     bool BMarkedForDelete = false;
 };
 
+class WorkObj
+{
+public:
+
+    std::vector<Work*> Works;
+
+    std::mutex Lock{};
+};
+
 class Connections
 {
 public:
@@ -83,7 +92,7 @@ private:
     std::vector<fd_set> Readsets;
     std::vector<std::vector<Connections>> Cons;
 
-    std::vector<Work*> WorkToBeDone;
+    std::vector<WorkObj*> WorkToBeDone;
 
     std::chrono::steady_clock::time_point LastTime;
 
@@ -96,7 +105,7 @@ public:
 
     void Construct_Vecs(int size);
     //This is the function where the main thread will keep looping
-    int SocketMain(int numberofthreads);
+    int SocketMain(unsigned int numberofthreads);
 
     //will loop through the Readsets to deduce which one has the least amount of sockets
     int SetSizeFinder();
@@ -105,7 +114,7 @@ public:
 
     void AddThreadToPool(WorkerThread* InThread) { threads.emplace_back(InThread); }
 
-    inline std::vector<Work*>& GetWorkVector() { return WorkToBeDone; }
+    inline std::vector<WorkObj*>& GetWorkVector() { return WorkToBeDone; }
 };
 
 
