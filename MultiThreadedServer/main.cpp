@@ -1,5 +1,4 @@
 #include "Socket.h"
-#include <thread>
 
 int main()
 {
@@ -10,10 +9,16 @@ int main()
     std::cout << "Enter Thread Count, Enter 0 for supported Max threads" << std::endl;
     std::cin >> Num;
 
+    ThreadPoolManager* Manager;
+
 	if (Num <= 0 or Num > MaxThreads)
-		threadPool thpool(MaxThreads);
+    {
+        Manager = new ThreadPoolManager(MaxThreads);
+    }
 	else
-		threadPool thpool(Num);
+    {
+        Manager = new ThreadPoolManager(Num);
+    }
 
     exit(0);
     system("Pause");

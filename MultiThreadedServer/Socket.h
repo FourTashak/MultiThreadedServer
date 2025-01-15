@@ -13,6 +13,11 @@
 
 #pragma comment (lib, "Ws2_32.lib")
 
+class Work;
+class WorkerThread;
+class ThreadPoolManager;
+class Connections;
+
 class Work
 {
 public:
@@ -34,86 +39,73 @@ public:
     bool BMarkedForDelete = false;
 };
 
-class threadPool
+class Connections
 {
-    class Connections;
-    class Threads;
+public:
+    Connections(std::unique_ptr<SOCKET> Socket, sockaddr_in clientaddress)
+    {
+        sock_.reset(Socket.release());
+        Clientaddress_ = clientaddress;
+    }
+    ~Connections()
+    {
+        closesocket((SOCKET)sock_.get());
+    }
+
+    std::shared_ptr<SOCKET> sock_;
+    sockaddr_in Clientaddress_;
+    std::string Name;
+};
+
+class WorkerThread
+{
+public:
+    WorkerThread(int threadIndex,std::vector<std::vector<Connections>>& ConVec, std::vector<fd_set>& ReadVec, ThreadPoolManager* MainPoolPtr);
+
+    //this is the main function for the worker threads, here the worker threads are in an infinite loop where they check on sockets assigned to them
+    //and receive data if there is data to be received.
+    void run(int number, std::vector<std::vector<Connections>>& ConVec, std::vector<fd_set>& ReadVec);
+
+    bool JoinFlag = false;
+
+    void GetWorkAndSendResult(Work* InWork);
+
+    ThreadPoolManager* OwnerPool;
+
+    std::thread* ResponsibleOfThread = nullptr;
+};
+
+class ThreadPoolManager
+{
 private:
+    std::vector<bool> JoinFlag;
+
     std::vector<fd_set> Readsets;
     std::vector<std::vector<Connections>> Cons;
 
     std::vector<Work*> WorkToBeDone;
 
     std::chrono::steady_clock::time_point LastTime;
+
+    std::vector<WorkerThread*> threads;
+
+    void LockWorkToBeDone();
+    void UnlockWorkToBeDone();
 public:
-    threadPool(unsigned int numberofthreads)
-    {
-        Cons.resize(numberofthreads);
-        Readsets.reserve(numberofthreads);
-        Construct_Vecs(numberofthreads);
-        Threads th(numberofthreads,Cons,Readsets,this);
-        SocketMain(th);
-    }
+    ThreadPoolManager(unsigned int numberofthreads);
+
     void Construct_Vecs(int size);
     //This is the function where the main thread will keep looping
-    int SocketMain(Threads& Th);
+    int SocketMain(int numberofthreads);
 
     //will loop through the Readsets to deduce which one has the least amount of sockets
     int SetSizeFinder();
 
     void InComingConnectionSetManager(SOCKET clientsocket, sockaddr_in Clientaddress);
 
-    class Threads
-    {
-        friend threadPool;
-    public:
-        Threads(unsigned int numberofthreads, std::vector<std::vector<Connections>>& ConVec, std::vector<fd_set>& ReadVec,threadPool* MainPoolPtr)
-        {
-            OwnerPool = MainPoolPtr;
-            JoinFlag.resize(numberofthreads);
-            for (unsigned int i = 0; i < numberofthreads; i++)
-            {
-                //Worker threads get emplaced back into the vector and start running the run function
-                threads.emplace_back(std::thread(&Threads::run, this, i, std::ref(ConVec), std::ref(ReadVec), std::ref(JoinFlag)));
-            }
-        }
-        //This function is used when authentication is successful
-        //it send stock name and prices, and how many stocks the customer has and balance
+    void AddThreadToPool(WorkerThread* InThread) { threads.emplace_back(InThread); }
 
-        int SendCusInfo(SOCKET clientsocket, std::string Cus);
-
-        //this is the main function for the worker threads, here the worker threads are in an infinite loop where they check on sockets assigned to them
-        //and receive data if there is data to be received.
-        void run(int number, std::vector<std::vector<Connections>>& ConVec, std::vector<fd_set>& ReadVec, std::vector<bool>& Joinflag);
-
-    private:
-        void GetWorkAndSendResult(Work* InWork);
-
-        std::vector<std::thread> threads;
-        std::vector<bool> JoinFlag;
-
-        threadPool* OwnerPool;
-    };
-
-    class Connections
-    {
-        friend Threads;
-        friend threadPool;
-    public:
-        Connections(std::unique_ptr<SOCKET> Socket, sockaddr_in clientaddress)
-        {
-            sock_.reset(Socket.release());
-            Clientaddress_ = clientaddress;
-        }
-        ~Connections()
-        {
-            closesocket((SOCKET)sock_.get());
-        }
-    private:
-        std::shared_ptr<SOCKET> sock_;
-        sockaddr_in Clientaddress_;
-        std::string Name;
-    };
+    inline std::vector<Work*>& GetWorkVector() { return WorkToBeDone; }
 };
 
 

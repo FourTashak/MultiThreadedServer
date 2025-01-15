@@ -1,6 +1,25 @@
 #include "Socket.h"
 
-void threadPool::Construct_Vecs(int size)
+void ThreadPoolManager::LockWorkToBeDone()
+{
+
+}
+
+void ThreadPoolManager::UnlockWorkToBeDone()
+{
+
+}
+
+ThreadPoolManager::ThreadPoolManager(unsigned int numberofthreads)
+{
+    Cons.resize(numberofthreads);
+    Readsets.reserve(numberofthreads);
+    Construct_Vecs(numberofthreads);
+    //WorkerThread th(numberofthreads, Cons, Readsets, this);
+    SocketMain(numberofthreads);
+}
+
+void ThreadPoolManager::Construct_Vecs(int size)
 {
     fd_set Temp;
     FD_ZERO(&Temp);
@@ -11,7 +30,7 @@ void threadPool::Construct_Vecs(int size)
     }
 }
 
-int threadPool::SocketMain(Threads& Th)
+int ThreadPoolManager::SocketMain(int numberofthreads)
 {
     // Initialize Winsock2
     WSADATA wsaData;
@@ -75,6 +94,15 @@ int threadPool::SocketMain(Threads& Th)
     T.tv_usec = 100000;
     T.tv_sec = 0;
 
+    for (unsigned int i = 0; i < numberofthreads; i++)
+    {
+        WorkerThread* NewWorkerThread = new WorkerThread(i,Cons,Readsets,this);
+
+        std::thread* NewThread = new std::thread([i, this, NewWorkerThread]() mutable {NewWorkerThread->run(i,Cons,Readsets); });
+
+        AddThreadToPool(NewWorkerThread);
+    }
+
     //The loop where the main thread will loop indefinitely, accepting connections and passing the connections over to the worker threads
     while (true)
     {
@@ -86,10 +114,10 @@ int threadPool::SocketMain(Threads& Th)
             //If the shutdown command is entered into the console, the main thread will request the worker threads to finish up what they and wait for them to join
             if (In == "Shutdown")
             {
-                for (int i = 0; i < Th.threads.size(); i++)
+                for (int i = 0; i < threads.size(); i++)
                 {
-                    Th.JoinFlag[i] = true;
-                    Th.threads[i].join();
+                    threads[i]->JoinFlag = true;
+                    threads[i]->ResponsibleOfThread->join();
                 }
                 break;
             }
@@ -165,7 +193,7 @@ int threadPool::SocketMain(Threads& Th)
     return 0;
 }
 
-int threadPool::SetSizeFinder()
+int ThreadPoolManager::SetSizeFinder()
 {
     auto min = Readsets[0].fd_count;
     int setindentifier = 0;
@@ -180,7 +208,7 @@ int threadPool::SetSizeFinder()
     return setindentifier;
 }
 
-void threadPool::InComingConnectionSetManager(SOCKET clientsocket, sockaddr_in Clientaddress)
+void ThreadPoolManager::InComingConnectionSetManager(SOCKET clientsocket, sockaddr_in Clientaddress)
 {
     int i = SetSizeFinder();
     FD_SET(clientsocket, &Readsets[i]);
@@ -188,7 +216,12 @@ void threadPool::InComingConnectionSetManager(SOCKET clientsocket, sockaddr_in C
     Cons[i].emplace_back(Connections(std::move(clientsocketnew), Clientaddress));
 }
 
-void threadPool::Threads::run(int ThreadIndex, std::vector<std::vector<Connections>>& ConVec, std::vector<fd_set>& ReadVec, std::vector<bool>& Joinflag)
+WorkerThread::WorkerThread(int threadIndex,std::vector<std::vector<Connections>>& ConVec, std::vector<fd_set>& ReadVec, ThreadPoolManager* MainPoolPtr)
+{
+    OwnerPool = MainPoolPtr;
+}
+
+void WorkerThread::run(int ThreadIndex, std::vector<std::vector<Connections>>& ConVec, std::vector<fd_set>& ReadVec)
 {
     timeval t;
     t.tv_usec = 100000;
@@ -196,7 +229,7 @@ void threadPool::Threads::run(int ThreadIndex, std::vector<std::vector<Connectio
     while (true)
     {
         //if the joinflag gets set by the main thread the worker thread will end all client connections and join.
-        if (JoinFlag[ThreadIndex] == true)
+        if (JoinFlag == true)
         {
             for (int i = 0; i < ConVec[ThreadIndex].size(); i++)
             {
@@ -259,7 +292,7 @@ void threadPool::Threads::run(int ThreadIndex, std::vector<std::vector<Connectio
 
                         Work *NewWork = new Work(Numbers, ThreadIndex, *ConVec[ThreadIndex][i].sock_.get());
 
-                        OwnerPool->WorkToBeDone.push_back(std::move(NewWork));
+                        OwnerPool->GetWorkVector().push_back(std::move(NewWork));
 
                         //int result = send(*ConVec[ThreadIndex][i].sock_.get(), "Zort", 3, 0);
                     }
@@ -267,9 +300,9 @@ void threadPool::Threads::run(int ThreadIndex, std::vector<std::vector<Connectio
             }
         }
 
-        if()
+        if(true)
         {
-            for (auto& Work : OwnerPool->WorkToBeDone)
+            for (auto& Work : OwnerPool->GetWorkVector())
             {
                 if (!Work->BTaken.exchange(true))
                 {
@@ -280,7 +313,7 @@ void threadPool::Threads::run(int ThreadIndex, std::vector<std::vector<Connectio
     }
 }
 
-void threadPool::Threads::GetWorkAndSendResult(Work* InWork)
+void WorkerThread::GetWorkAndSendResult(Work* InWork)
 {
     InWork->BTaken.store(true);
 
