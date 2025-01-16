@@ -1,4 +1,5 @@
 #include "Socket.h"
+#include <cmath>
 
 void ThreadPoolManager::LockWorkToBeDone()
 {
@@ -193,7 +194,7 @@ int ThreadPoolManager::SocketMain(unsigned int numberofthreads)
                         {
                             if (WorkToBeDone[i]->Works[j]->BMarkedForDelete)
                             {
-                                WorkToBeDone.erase(WorkToBeDone.begin() + i);
+                                WorkToBeDone[i]->Works.erase(WorkToBeDone[i]->Works.begin() + j);
                             }
                         }
 
@@ -324,17 +325,53 @@ void WorkerThread::run(int ThreadIndex, std::vector<std::vector<Connections>>& C
 
                                 break;
                             }
-                            else
-                            {
-                                volatile int debug = 1;
-                                debug += 1;
-                            }
                         }
 
                         //int result = send(*ConVec[ThreadIndex][i].sock_.get(), "Zort", 3, 0);
                     }
                 }
             }
+        }
+
+        WorkObj* CurrentThreadWork = OwnerPool->GetWorkVector()[ThreadIndex];
+
+        while (true)
+        {
+            bool CanLock = CurrentThreadWork->Lock.try_lock();
+
+            if (CanLock)
+            {
+                for (int i = OwnerPool->GetWorkVector()[ThreadIndex]->Works.size() - 1; i >= 0; i--)
+                {
+                    Work* CurrentWork = OwnerPool->GetWorkVector()[ThreadIndex]->Works[i];
+
+                    int reesult = 1;
+
+                    for (int Num : CurrentWork->Numbers)
+                    {
+                        reesult *= Num;
+                    }
+
+                    std::string StringMessage = std::to_string(reesult);
+
+                    const char* Message = StringMessage.c_str();
+
+                    int result = send(*CurrentWork->QuerierSocket, Message, StringMessage.length(), 0);
+
+                    if (result != SOCKET_ERROR)
+                    {
+                        CurrentWork->BMarkedForDelete = true;
+                    }
+                }
+
+                CurrentThreadWork->Lock.unlock();
+            }
+            else
+            {
+                std::cout << "Debug" << std::endl;
+            }
+
+            break;
         }
     }
 }
