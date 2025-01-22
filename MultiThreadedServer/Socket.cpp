@@ -24,8 +24,6 @@ ThreadPoolManager::ThreadPoolManager(unsigned int numberofthreads)
         WorkToBeDone.push_back(newWorkObj);
     }
     SocketMain(numberofthreads);
-
-    
 }
 
 void ThreadPoolManager::Construct_Vecs(int size)
@@ -194,6 +192,7 @@ int ThreadPoolManager::SocketMain(unsigned int numberofthreads)
                         {
                             if (WorkToBeDone[i]->Works[j]->BMarkedForDelete)
                             {
+                                delete WorkToBeDone[i]->Works[j];
                                 WorkToBeDone[i]->Works.erase(WorkToBeDone[i]->Works.begin() + j);
                             }
                         }
@@ -257,7 +256,7 @@ void WorkerThread::run(int ThreadIndex, std::vector<std::vector<Connections>>& C
             break;
         }
         int Sel = 0;
-        Sleep(50);
+        //Sleep(50);
         //Cleans the fd_set
         FD_ZERO(&(ReadVec[ThreadIndex]));
         //sets the fd_set with assigned sockets
@@ -273,6 +272,21 @@ void WorkerThread::run(int ThreadIndex, std::vector<std::vector<Connections>>& C
         if (Sel == SOCKET_ERROR)
         {
             std::cout << "Socket Error at thread number : " << ThreadIndex << std::endl;
+            for (int i = 0; i < ReadVec[ThreadIndex].fd_count; i++)
+            {
+                SOCKET* OutSocket = &ReadVec[ThreadIndex].fd_array[i];
+
+                char error_code[1024];
+                int error_code_size = sizeof(error_code);
+                int ErrorNum = getsockopt(*OutSocket, SOL_SOCKET, SO_ERROR, error_code, &error_code_size);
+
+                if (ErrorNum < 0)
+                {
+                    FD_CLR(*ConVec[ThreadIndex][i].sock_.get(), &ReadVec[ThreadIndex]);
+                    ConVec[ThreadIndex].erase(ConVec[ThreadIndex].begin() + i);
+                }
+            }
+
             Sleep(50);
         }
         else if (Sel == 0) { Sleep(50); }
@@ -281,7 +295,10 @@ void WorkerThread::run(int ThreadIndex, std::vector<std::vector<Connections>>& C
             //loops through every socket and checks which socket has data to be received
             for (int i = 0; i < ReadVec[ThreadIndex].fd_count; i++)
             {
-                if (FD_ISSET(*ConVec[ThreadIndex][i].sock_.get(), &ReadVec[ThreadIndex]))
+                SOCKET* SokRef = ConVec[ThreadIndex][i].sock_.get();
+                fd_set* SetRef = &ReadVec[ThreadIndex];
+
+                if (FD_ISSET(*SokRef, SetRef))
                 {
                     char buffer[1024];
                     int bytes_rec = recv(*ConVec[ThreadIndex][i].sock_.get(), buffer, sizeof(buffer), 0);
@@ -326,8 +343,6 @@ void WorkerThread::run(int ThreadIndex, std::vector<std::vector<Connections>>& C
                                 break;
                             }
                         }
-
-                        //int result = send(*ConVec[ThreadIndex][i].sock_.get(), "Zort", 3, 0);
                     }
                 }
             }
@@ -356,22 +371,22 @@ void WorkerThread::run(int ThreadIndex, std::vector<std::vector<Connections>>& C
 
                     const char* Message = StringMessage.c_str();
 
-                    int result = send(*CurrentWork->QuerierSocket, Message, StringMessage.length(), 0);
+                    int result = send(*CurrentWork->QuerierSocket, Message, StringMessage.size(), 0);
 
-                    if (result != SOCKET_ERROR)
+                    if (result > 0)
                     {
                         CurrentWork->BMarkedForDelete = true;
                     }
                 }
 
                 CurrentThreadWork->Lock.unlock();
+
+                break;
             }
             else
             {
                 std::cout << "Debug" << std::endl;
             }
-
-            break;
         }
     }
 }
